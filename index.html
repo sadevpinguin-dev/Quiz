@@ -1,0 +1,339 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuizArena Online</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#111329;color:#fff;min-height:100vh}
+main{max-width:1000px;margin:auto;padding:24px}
+header{display:flex;align-items:center;gap:14px;margin-bottom:24px}
+.logo{background:#a78bfa;color:#17112e;padding:15px;border-radius:14px;font-weight:bold;font-size:22px}
+h1,h2,p{margin-top:0}
+header p,.muted{color:#b5bad3}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
+.panel{background:#202440;padding:22px;border:1px solid #383e60;border-radius:20px;margin-bottom:18px}
+label{display:block;margin:14px 0 7px}
+input{width:100%;padding:13px;border-radius:10px;border:1px solid #4a5071;background:#111329;color:white;font-size:16px}
+button{padding:13px 17px;border:0;border-radius:10px;background:#a78bfa;color:#17112e;font-weight:bold;cursor:pointer;margin-top:12px;font-size:15px}
+button:disabled{opacity:.5}
+.secondary{background:#373d5b;color:white}
+.hidden{display:none!important}
+.pin{font-size:42px;letter-spacing:7px;color:#c4b5fd;font-weight:bold}
+.topline{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.badge{background:#373d5b;padding:7px 11px;border-radius:30px;font-size:13px}
+#timer{color:#fcd34d;font-size:23px;font-weight:bold}
+#question{line-height:1.5;margin-top:24px}
+.answers{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px}
+.answers button{margin:0;min-height:75px;text-align:left;color:white}
+.answers button:nth-child(1){background:#e34b67}
+.answers button:nth-child(2){background:#347be5}
+.answers button:nth-child(3){background:#159b7b}
+.answers button:nth-child(4){background:#c17b22}
+.player{display:flex;justify-content:space-between;padding:13px 0;border-bottom:1px solid #383e60;gap:10px}
+.status{padding:12px;background:#111329;border-radius:10px;margin-top:12px}
+#notice{color:#c4b5fd;margin-top:14px;min-height:20px}
+footer{text-align:center;color:#777f9e;margin-top:20px}
+@media(max-width:520px){main{padding:14px}.answers{grid-template-columns:1fr}.pin{font-size:34px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="logo">QA</div>
+  <div><h1 style="margin-bottom:5px">QuizArena Online</h1>
+  <p style="margin:0">IT • Diniyah • Kuis SMP</p></div>
+</header>
+
+<section id="home" class="grid">
+  <div class="panel">
+    <h2>🎓 Host / Guru</h2>
+    <p class="muted">Buat room dan bagikan PIN kepada pemain.</p>
+    <button id="createBtn">Buat Room</button>
+    <div id="hostResult" class="hidden">
+      <p class="muted">PIN ROOM</p>
+      <div id="hostPin" class="pin"></div>
+      <button id="startBtn">Mulai Kuis</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>🎮 Gabung Kuis</h2>
+    <label for="pinInput">PIN room</label>
+    <input id="pinInput" maxlength="6" inputmode="numeric" placeholder="Masukkan PIN">
+    <label for="nameInput">Nama pemain</label>
+    <input id="nameInput" maxlength="20" placeholder="Nama kamu">
+    <button id="joinBtn">Gabung Game</button>
+  </div>
+</section>
+
+<section id="game" class="hidden">
+  <div class="topline">
+    <span id="roleBadge" class="badge">Pemain</span>
+    <span id="roomLabel" class="badge">PIN</span>
+    <span id="timer">15 detik</span>
+  </div>
+
+  <div class="grid" style="margin-top:18px">
+    <div class="panel">
+      <div class="topline">
+        <span id="qCount" class="badge">Lobby</span>
+        <span id="category" class="badge">Kuis</span>
+      </div>
+      <h2 id="question">Menunggu permainan...</h2>
+      <div id="answers" class="answers"></div>
+      <div id="notice"></div>
+      <div id="hostControls" class="hidden">
+        <button id="nextBtn">Soal Berikutnya →</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>🏆 Leaderboard</h2>
+      <div id="leaderboard" class="muted">Menunggu pemain...</div>
+      <p class="muted">Maksimal 5 pemain</p>
+    </div>
+  </div>
+  <button id="leaveBtn" class="secondary">Kembali</button>
+</section>
+<footer>QuizArena Online • Belajar sambil bermain</footer>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+let pin = "";
+let hostToken = "";
+let playerToken = "";
+let playerName = "";
+let isHost = false;
+let lastQuestion = -1;
+let answered = false;
+let poll = null;
+
+async function api(action, data = {}) {
+  const response = await fetch("/api/game", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action, ...data})
+  });
+
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Permintaan gagal.");
+  return result;
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, char => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;",
+    '"':"&quot;", "'":"&#39;"
+  })[char]);
+}
+
+function openGame() {
+  $("home").classList.add("hidden");
+  $("game").classList.remove("hidden");
+  $("roomLabel").textContent = "PIN " + pin;
+  $("roleBadge").textContent = isHost ? "Host / Guru" : playerName;
+  $("hostControls").classList.toggle("hidden", !isHost);
+}
+
+function showNotice(message) {
+  $("notice").textContent = message || "";
+}
+
+async function refresh() {
+  if (!pin) return;
+
+  try {
+    const state = await api("state", {
+      pin, hostToken, playerToken
+    });
+    render(state);
+  } catch (error) {
+    showNotice(error.message);
+  }
+}
+
+function render(state) {
+  $("leaderboard").innerHTML = state.players.length
+    ? state.players.map((player, index) => `
+      <div class="player">
+        <span>${index + 1}. ${escapeHTML(player.name)}</span>
+        <strong>${player.score} pts</strong>
+      </div>
+    `).join("")
+    : "Belum ada pemain.";
+
+  $("roomLabel").textContent = "PIN " + pin;
+
+  if (state.status === "lobby") {
+    $("qCount").textContent = "Lobby";
+    $("category").textContent = "Siap bermain";
+    $("question").textContent = isHost
+      ? "Tunggu pemain bergabung, lalu mulai kuis."
+      : "Menunggu guru memulai kuis...";
+    $("answers").innerHTML = "";
+    $("timer").textContent = "15 detik";
+    return;
+  }
+
+  if (state.status === "finished") {
+    $("qCount").textContent = "Selesai";
+    $("category").textContent = "Hasil akhir";
+    $("question").textContent = "🎉 Kuis selesai!";
+    $("answers").innerHTML = "";
+    $("timer").textContent = "Selesai";
+    $("nextBtn").disabled = true;
+    return;
+  }
+
+  const q = state.question;
+  if (!q) return;
+
+  $("nextBtn").disabled = false;
+  $("qCount").textContent = `Soal ${q.number} / ${q.total}`;
+  $("category").textContent = q.category;
+  $("question").textContent = q.question;
+  $("timer").textContent = state.seconds + " detik";
+
+  if (lastQuestion !== state.questionIndex) {
+    lastQuestion = state.questionIndex;
+    answered = false;
+    showNotice("");
+  }
+
+  if (isHost) {
+    $("answers").innerHTML = q.options.map((option, i) =>
+      `<div class="status">${["🔴","🔵","🟢","🟡"][i]} ${escapeHTML(option)}</div>`
+    ).join("");
+    return;
+  }
+
+  if (answered) {
+    $("answers").innerHTML =
+      '<div class="status">Jawaban terkirim. Tunggu soal berikutnya.</div>';
+    return;
+  }
+
+  $("answers").innerHTML = q.options.map((option, i) =>
+    `<button data-choice="${i}">${["🔴","🔵","🟢","🟡"][i]} ${escapeHTML(option)}</button>`
+  ).join("");
+
+  document.querySelectorAll("[data-choice]").forEach(button => {
+    button.addEventListener("click", () =>
+      submitAnswer(Number(button.dataset.choice))
+    );
+  });
+}
+
+async function submitAnswer(choice) {
+  if (answered) return;
+  answered = true;
+
+  document.querySelectorAll("[data-choice]").forEach(button => {
+    button.disabled = true;
+  });
+
+  try {
+    const result = await api("answer", {pin, playerToken, choice});
+    showNotice(result.correct
+      ? `Benar! +${result.points} poin`
+      : "Belum tepat. Coba lagi di soal berikutnya!");
+    await refresh();
+  } catch (error) {
+    showNotice(error.message);
+  }
+}
+
+function beginPolling() {
+  if (poll) clearInterval(poll);
+  poll = setInterval(refresh, 1500);
+}
+
+$("createBtn").onclick = async () => {
+  try {
+    $("createBtn").disabled = true;
+    const result = await api("create");
+    pin = result.pin;
+    hostToken = result.hostToken;
+    isHost = true;
+
+    $("hostPin").textContent = pin;
+    $("hostResult").classList.remove("hidden");
+
+    openGame();
+    await refresh();
+    beginPolling();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    $("createBtn").disabled = false;
+  }
+};
+
+$("joinBtn").onclick = async () => {
+  try {
+    $("joinBtn").disabled = true;
+    const result = await api("join", {
+      pin: $("pinInput").value,
+      name: $("nameInput").value
+    });
+
+    pin = result.pin;
+    playerToken = result.playerToken;
+    playerName = result.name;
+    isHost = false;
+
+    openGame();
+    await refresh();
+    beginPolling();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    $("joinBtn").disabled = false;
+  }
+};
+
+$("startBtn").onclick = async () => {
+  try {
+    await api("start", {pin, hostToken});
+    await refresh();
+  } catch (error) {
+    alert(error.message);
+  }
+};
+
+$("nextBtn").onclick = async () => {
+  try {
+    await api("next", {pin, hostToken});
+    lastQuestion = -1;
+    answered = false;
+    await refresh();
+  } catch (error) {
+    alert(error.message);
+  }
+};
+
+$("leaveBtn").onclick = () => {
+  if (poll) clearInterval(poll);
+
+  pin = "";
+  hostToken = "";
+  playerToken = "";
+  playerName = "";
+  isHost = false;
+  lastQuestion = -1;
+  answered = false;
+
+  $("game").classList.add("hidden");
+  $("home").classList.remove("hidden");
+  $("hostResult").classList.add("hidden");
+  $("createBtn").textContent = "Buat Room";
+  $("nextBtn").disabled = false;
+};
+</script>
+</body>
+</html>
